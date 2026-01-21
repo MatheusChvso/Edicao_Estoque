@@ -80,6 +80,8 @@ class Produto(db.Model):
     preco = db.Column('Preco', db.Numeric(10, 2), nullable=True, default=0.00)
     codigoB = db.Column('CodigoB', db.String(20))
     codigoC = db.Column('CodigoC', db.String(20))
+    id_setor = db.Column(db.Integer, db.ForeignKey('setor.id_setor'), nullable=True)
+    setor = db.relationship('Setor', back_populates='produtos')
     
     fornecedores = db.relationship('Fornecedor', secondary=produto_fornecedor, back_populates='produtos')
     naturezas = db.relationship('Natureza', secondary=produto_natureza, back_populates='produtos')
@@ -89,6 +91,12 @@ class Fornecedor(db.Model):
     id_fornecedor = db.Column(db.Integer, primary_key=True)
     nome = db.Column('Nome', db.String(50), unique=True, nullable=False)
     produtos = db.relationship('Produto', secondary=produto_fornecedor, back_populates='fornecedores')
+
+class Setor(db.Model):
+    __tablename__ = 'setor'
+    id_setor = db.Column(db.Integer, primary_key=True)
+    nome = db.Column('nome', db.String(100), unique=True, nullable=False)
+    produtos = db.relationship('Produto', back_populates='setor')
 
 class Natureza(db.Model):
     __tablename__ = 'natureza'
@@ -210,6 +218,8 @@ def get_todos_produtos():
                 'codigoC': produto.codigoC,
                 'fornecedores': ", ".join(sorted(fornecedores_list)),
                 'naturezas': ", ".join(sorted(naturezas_list))
+                'setor_nome': produto.setor.nome if produto.setor else '', # NOVO
+                'id_setor': produto.id_setor # NOVO
             })
             
         return jsonify(produtos_json), 200
@@ -237,7 +247,8 @@ def add_novo_produto():
             # Usa o preço fornecido, ou 0 se não for enviado
             preco=dados.get('preco', '0.00').replace(',', '.'), 
             codigoB=dados.get('codigoB'),
-            codigoC=dados.get('codigoC')
+            codigoC=dados.get('codigoC'),
+            id_setor=dados.get('id_setor') # NOVO
         )
         db.session.add(novo_produto)
         db.session.commit()
@@ -431,6 +442,7 @@ def produto_por_id_endpoint(id_produto):
             produto.preco = dados['preco']
             produto.codigoB = dados.get('codigoB')
             produto.codigoC = dados.get('codigoC')
+            produto.id_setor = dados.get('id_setor') # NOVO
 
             if 'fornecedores_ids' in dados:
                 produto.fornecedores.clear()
@@ -452,7 +464,8 @@ def produto_por_id_endpoint(id_produto):
             # Após salvar, buscamos os dados atualizados e os devolvemos para o front-end.
             updated_product = Produto.query.options(
                 joinedload(Produto.fornecedores),
-                joinedload(Produto.naturezas)
+                joinedload(Produto.naturezas),
+                joinedload(Produto.setor)
             ).get(id_produto)
 
             fornecedores_str = ", ".join(sorted([f.nome for f in updated_product.fornecedores]))
@@ -467,7 +480,9 @@ def produto_por_id_endpoint(id_produto):
                 'codigoB': updated_product.codigoB,
                 'codigoC': updated_product.codigoC,
                 'fornecedores': fornecedores_str,
-                'naturezas': naturezas_str
+                'naturezas': naturezas_str,
+                'setor_nome': updated_product.setor.nome if updated_product.setor else '',
+                'id_setor': updated_product.id_setor
             }
             return jsonify(response_data), 200 # Devolve os dados atualizados
         
@@ -724,6 +739,7 @@ def get_saldos_estoque():
     """
     try:
         termo_busca = request.args.get('search')
+        filtro_setor = request.args.get('setor_id')
         
         # Começa a query base de produtos
         query = Produto.query
@@ -752,7 +768,8 @@ def get_saldos_estoque():
                 # --- NOVOS CAMPOS ADICIONADOS ---
                 'preco': str(produto.preco),
                 'codigoB': produto.codigoB.strip() if produto.codigoB else '',
-                'codigoC': produto.codigoC.strip() if produto.codigoC else ''
+                'codigoC': produto.codigoC.strip() if produto.codigoC else '',
+                'setor_nome': produto.setor.nome if produto.setor else 'Sem Setor' # NOVO
             })
             
         return jsonify(saldos_json), 200
@@ -1185,7 +1202,44 @@ def mudar_senha_usuario():
     except Exception as e:
         db.session.rollback()
         return jsonify({'erro': str(e)}), 500    
-    
+
+
+
+
+#===============================================================================
+#                         ROTAS DA API PARA SETORES
+#===============================================================================                          
+@app.route('/api/setores', methods=['GET'])
+@jwt_required()
+def get_todos_setores():
+    setores = Setor.query.order_by(Setor.nome).all()
+    return jsonify([{'id': s.id_setor, 'nome': s.nome} for s in setores]), 200
+
+@app.route('/api/setores', methods=['POST'])
+@jwt_required()
+def add_novo_setor():
+    dados = request.get_json()
+    if 'nome' not in dados: return jsonify({'erro': 'Nome obrigatório'}), 400
+    novo = Setor(nome=dados['nome'])
+    db.session.add(novo)
+    db.session.commit()
+    return jsonify({'mensagem': 'Setor criado!'}), 201
+
+@app.route('/api/setores/<int:id_setor>', methods=['PUT', 'DELETE'])
+@jwt_required()
+def gerenciar_setor(id_setor):
+    setor = Setor.query.get_or_404(id_setor)
+    if request.method == 'PUT':
+        dados = request.get_json()
+        setor.nome = dados['nome']
+        db.session.commit()
+        return jsonify({'mensagem': 'Atualizado!'}), 200
+    if request.method == 'DELETE':
+        if setor.produtos:
+            return jsonify({'erro': 'Setor possui produtos vinculados.'}), 400
+        db.session.delete(setor)
+        db.session.commit()
+        return jsonify({'mensagem': 'Removido!'}), 200    
 # ==============================================================================
 #          ROTAS DA API PARA DASHBOARD E OUTRAS FUNÇÕES
 # ==============================================================================

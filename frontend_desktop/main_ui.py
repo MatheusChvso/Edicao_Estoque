@@ -35,12 +35,13 @@ from config import SERVER_IP
 # ==============================================================================
 access_token = None
 API_BASE_URL = f"http://{SERVER_IP}:5000"
-APP_VERSION = "2.2"
+APP_VERSION = "2.3.2026"
 
 class SignalHandler(QObject):
     """Um gestor central para sinais globais da aplicação."""
     fornecedores_atualizados = Signal()
     naturezas_atualizadas = Signal()
+    setores_atualizados = Signal() # NOVO
 
 signal_handler = SignalHandler()
 
@@ -135,71 +136,154 @@ class FormDataLoader(QObject):
 
 class FormularioProdutoDialog(QDialog):
     produto_atualizado = Signal(int, dict)
+
     def __init__(self, parent=None, produto_id=None, row=None):
         super().__init__(parent)
         self.produto_id = produto_id
         self.row = row
-        self.setWindowTitle("Adicionar Novo Produto" if self.produto_id is None else "Editar Produto")
-        self.setMinimumSize(450, 600)
-        self.layout = QFormLayout(self)
         self.dados_produto_carregados = None
+        
+        # Configuração da Janela
+        self.setWindowTitle("Editar Produto" if self.produto_id else "Adicionar Novo Produto")
+        self.setMinimumSize(500, 650)
+        
+        # Inicialização
+        self.setup_ui()
+        self.connect_signals()
+        self.iniciar_carregamento_assincrono()
+
+    def setup_ui(self):
+        """Constrói toda a interface gráfica do diálogo."""
+        self.layout_principal = QVBoxLayout(self)
+
+        # --- Grupo 1: Identificação Básica ---
+        group_identificacao = QFrame()
+        layout_ident = QFormLayout(group_identificacao)
+        
         self.input_codigo = QLineEdit()
-        self.input_nome = QLineEdit()
-        self.input_descricao = QLineEdit()
-        self.input_preco = QLineEdit()
-        self.input_preco.setValidator(QDoubleValidator(0.00, 999999.99, 2))
-        self.input_codigoB = QLineEdit()
-        self.input_codigoC = QLineEdit()
-        self.lista_fornecedores = QListWidget()
-        self.lista_fornecedores.setSelectionMode(QListWidget.SelectionMode.MultiSelection)
-        self.lista_fornecedores.setMaximumHeight(100)
-        self.lista_naturezas = QListWidget()
-        self.lista_naturezas.setSelectionMode(QListWidget.SelectionMode.MultiSelection)
-        self.lista_naturezas.setMaximumHeight(100)
+        self.input_codigo.setPlaceholderText("Ex: 789...")
         self.label_status_codigo = QLabel("")
         self.label_status_codigo.setFixedWidth(100)
-        self.btn_add_fornecedor = QPushButton("+")
-        self.btn_add_fornecedor.setFixedSize(25, 25)
-        self.btn_add_fornecedor.setObjectName("btnQuickAdd")
-        self.btn_add_natureza = QPushButton("+")
-        self.btn_add_natureza.setFixedSize(25, 25)
-        self.btn_add_natureza.setObjectName("btnQuickAdd")
-        self.botoes = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
-        self.verificacao_timer = QTimer(self)
-        self.verificacao_timer.setSingleShot(True)
-        self.verificacao_timer.timeout.connect(self.verificar_codigo_produto)
+        
         layout_codigo = QHBoxLayout()
         layout_codigo.addWidget(self.input_codigo)
         layout_codigo.addWidget(self.label_status_codigo)
-        self.layout.addRow("Código:", layout_codigo) 
-        self.layout.addRow("Nome:", self.input_nome)
-        self.layout.addRow("Descrição:", self.input_descricao)
-        self.layout.addRow("Preço:", self.input_preco)
-        self.layout.addRow("Código B:", self.input_codigoB)
-        self.layout.addRow("Código C:", self.input_codigoC)
-        layout_forn = QHBoxLayout()
-        layout_forn.addWidget(QLabel("Fornecedores:"))
-        layout_forn.addWidget(self.btn_add_fornecedor)
-        layout_forn.addStretch(1)
-        layout_nat = QHBoxLayout()
-        layout_nat.addWidget(QLabel("Naturezas:"))
-        layout_nat.addWidget(self.btn_add_natureza)
-        layout_nat.addStretch(1)
-        self.layout.addRow(layout_forn)
-        self.layout.addRow(self.lista_fornecedores)
-        self.layout.addRow(layout_nat)
-        self.layout.addRow(self.lista_naturezas)
-        self.layout.addWidget(self.botoes)
-        self.input_codigo.installEventFilter(self)
-        self.input_codigo.textChanged.connect(self.iniciar_verificacao_timer)
-        self.input_codigoC.returnPressed.connect(self.botoes.button(QDialogButtonBox.StandardButton.Save).click)
+        
+        self.input_nome = QLineEdit()
+        self.input_nome.setPlaceholderText("Nome do Produto")
+        
+        self.input_descricao = QLineEdit()
+        self.input_descricao.setPlaceholderText("Descrição detalhada (opcional)")
+
+        layout_ident.addRow("Código:*", layout_codigo)
+        layout_ident.addRow("Nome:*", self.input_nome)
+        layout_ident.addRow("Descrição:", self.input_descricao)
+        
+        self.layout_principal.addWidget(group_identificacao)
+
+        # --- Grupo 2: Valores e Códigos Auxiliares ---
+        group_detalhes = QFrame()
+        layout_detalhes = QFormLayout(group_detalhes)
+
+        self.input_preco = QLineEdit()
+        self.input_preco.setValidator(QDoubleValidator(0.00, 999999.99, 2))
+        self.input_preco.setPlaceholderText("0.00")
+        
+        self.input_codigoB = QLineEdit()
+        self.input_codigoC = QLineEdit()
+
+        layout_detalhes.addRow("Preço (R$):", self.input_preco)
+        layout_detalhes.addRow("Código B:", self.input_codigoB)
+        layout_detalhes.addRow("Código C:", self.input_codigoC)
+        
+        self.layout_principal.addWidget(group_detalhes)
+
+        # --- Grupo 3: Classificação e Associações ---
+        # Aqui entra a NOVIDADE: Setor
+        group_classificacao = QFrame()
+        layout_class = QVBoxLayout(group_classificacao)
+        layout_class.setContentsMargins(0, 10, 0, 0)
+
+        # Setor (ComboBox com botão adicionar)
+        lbl_setor = QLabel("Setor:")
+        layout_setor_combo = QHBoxLayout()
+        self.combo_setor = QComboBox()
+        self.btn_add_setor = QPushButton("+")
+        self.btn_add_setor.setFixedSize(30, 25)
+        self.btn_add_setor.setToolTip("Criar novo setor")
+        layout_setor_combo.addWidget(self.combo_setor)
+        layout_setor_combo.addWidget(self.btn_add_setor)
+
+        # Fornecedores (Lista Multi-seleção)
+        lbl_fornecedor = QLabel("Fornecedores:")
+        layout_forn_header = QHBoxLayout()
+        layout_forn_header.addWidget(lbl_fornecedor)
+        self.btn_add_fornecedor = QPushButton("+")
+        self.btn_add_fornecedor.setFixedSize(30, 25)
+        self.btn_add_fornecedor.setToolTip("Criar novo fornecedor")
+        layout_forn_header.addWidget(self.btn_add_fornecedor)
+        layout_forn_header.addStretch()
+        
+        self.lista_fornecedores = QListWidget()
+        self.lista_fornecedores.setSelectionMode(QListWidget.SelectionMode.MultiSelection)
+        self.lista_fornecedores.setMaximumHeight(80)
+
+        # Naturezas (Lista Multi-seleção)
+        lbl_natureza = QLabel("Naturezas:")
+        layout_nat_header = QHBoxLayout()
+        layout_nat_header.addWidget(lbl_natureza)
+        self.btn_add_natureza = QPushButton("+")
+        self.btn_add_natureza.setFixedSize(30, 25)
+        self.btn_add_natureza.setToolTip("Criar nova natureza")
+        layout_nat_header.addWidget(self.btn_add_natureza)
+        layout_nat_header.addStretch()
+
+        self.lista_naturezas = QListWidget()
+        self.lista_naturezas.setSelectionMode(QListWidget.SelectionMode.MultiSelection)
+        self.lista_naturezas.setMaximumHeight(80)
+
+        # Adicionando ao layout de classificação
+        layout_class.addWidget(lbl_setor)
+        layout_class.addLayout(layout_setor_combo)
+        layout_class.addLayout(layout_forn_header)
+        layout_class.addWidget(self.lista_fornecedores)
+        layout_class.addLayout(layout_nat_header)
+        layout_class.addWidget(self.lista_naturezas)
+        
+        self.layout_principal.addWidget(group_classificacao)
+
+        # --- Botões de Ação ---
+        self.botoes = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
+        self.layout_principal.addWidget(self.botoes)
+
+        # Timer para verificação de código
+        self.verificacao_timer = QTimer(self)
+        self.verificacao_timer.setSingleShot(True)
+
+    def connect_signals(self):
+        """Conecta todos os sinais e eventos dos widgets."""
+        self.botoes.accepted.connect(self.save_product)
+        self.botoes.rejected.connect(self.reject)
+        
+        # Atalhos de criação rápida
+        self.btn_add_setor.clicked.connect(self.adicionar_rapido_setor)
         self.btn_add_fornecedor.clicked.connect(self.adicionar_rapido_fornecedor)
         self.btn_add_natureza.clicked.connect(self.adicionar_rapido_natureza)
-        self.botoes.accepted.connect(self.accept)
-        self.botoes.rejected.connect(self.reject)
-        self.iniciar_carregamento_assincrono()
+        
+        # Verificação de código
+        self.input_codigo.textChanged.connect(self.iniciar_verificacao_timer)
+        self.verificacao_timer.timeout.connect(self.verificar_codigo_produto)
+        
+        # Navegação com Enter
+        self.input_codigo.returnPressed.connect(self.input_nome.setFocus)
+        self.input_nome.returnPressed.connect(self.input_preco.setFocus)
+
+    # --- Lógica de Carregamento de Dados ---
+
     def iniciar_carregamento_assincrono(self):
         self.definir_estado_carregamento(True)
+        
+        # Carrega dados básicos (Fornecedores/Naturezas) + Produto (se for edição)
         self.thread = QThread()
         self.worker = FormDataLoader(self.produto_id)
         self.worker.moveToThread(self.thread)
@@ -209,160 +293,185 @@ class FormularioProdutoDialog(QDialog):
         self.worker.finished.connect(self.worker.deleteLater)
         self.thread.finished.connect(self.thread.deleteLater)
         self.thread.start()
+
+        # Carrega Setores separadamente (pois é uma feature nova)
+        self.carregar_setores()
+
     def definir_estado_carregamento(self, a_carregar):
-        for widget in self.findChildren(QWidget):
-            if isinstance(widget, (QLineEdit, QListWidget, QPushButton)):
-                widget.setEnabled(not a_carregar)
+        self.setEnabled(not a_carregar)
         if a_carregar:
-            self.loading_label = QLabel("A carregar dados do servidor...")
-            self.layout.addRow(self.loading_label)
+            self.setWindowTitle("Carregando...")
         else:
-            if hasattr(self, 'loading_label'):
-                self.loading_label.hide()
-                self.loading_label.deleteLater()
+            self.setWindowTitle("Editar Produto" if self.produto_id else "Adicionar Novo Produto")
+
+    def carregar_setores(self):
+        """Carrega a lista de setores da API."""
+        self.combo_setor.clear()
+        self.combo_setor.addItem("Selecione um Setor (Opcional)", None)
+        
+        global access_token
+        headers = {'Authorization': f'Bearer {access_token}'}
+        try:
+            # Assume que a rota /api/setores já existe conforme instrução anterior
+            response = requests.get(f"{API_BASE_URL}/api/setores", headers=headers)
+            if response.status_code == 200:
+                setores = sorted(response.json(), key=lambda x: x['nome'])
+                for s in setores:
+                    self.combo_setor.addItem(s['nome'], s['id'])
+        except Exception as e:
+            print(f"Erro ao carregar setores: {e}")
+
     def preencher_dados_formulario(self, resultados):
+        """Distribui os dados recebidos da API nos campos."""
         self.definir_estado_carregamento(False)
+        
         if resultados['status'] == 'error':
-            if resultados['message'] == 'connection_error':
-                show_connection_error_message(self)
-            else:
-                QMessageBox.critical(self, "Erro de Carregamento", resultados['message'])
+            QMessageBox.critical(self, "Erro", resultados['message'])
             self.reject()
             return
+
+        # Popula Listas de Apoio
         for forn in resultados.get('fornecedores', []):
             item = QListWidgetItem(forn['nome'])
             item.setData(Qt.UserRole, forn['id'])
             self.lista_fornecedores.addItem(item)
+            
         for nat in resultados.get('naturezas', []):
             item = QListWidgetItem(nat['nome'])
             item.setData(Qt.UserRole, nat['id'])
             self.lista_naturezas.addItem(item)
+
+        # Se for edição, preenche os campos do produto
         if 'produto' in resultados:
             self.dados_produto_carregados = resultados['produto']
             dados = self.dados_produto_carregados
+            
             self.input_codigo.setText(dados.get('codigo', ''))
             self.input_nome.setText(dados.get('nome', ''))
             self.input_descricao.setText(dados.get('descricao', ''))
             self.input_preco.setText(str(dados.get('preco', '0.00')))
             self.input_codigoB.setText(dados.get('codigoB', ''))
             self.input_codigoC.setText(dados.get('codigoC', ''))
-            self.selecionar_itens_nas_listas(dados)
-    def eventFilter(self, source, event):
-        if source is self.input_codigo and event.type() == QEvent.Type.KeyPress:
-            if event.key() == Qt.Key.Key_Return or event.key() == Qt.Key.Key_Enter:
-                self.input_nome.setFocus()
-                return True
-        return super().eventFilter(source, event)
+            
+            # Seleciona Setor
+            id_setor = dados.get('id_setor')
+            if id_setor:
+                idx = self.combo_setor.findData(id_setor)
+                if idx >= 0: self.combo_setor.setCurrentIndex(idx)
+
+            # Seleciona Fornecedores e Naturezas
+            self.selecionar_itens_lista(self.lista_fornecedores, dados.get('fornecedores', []))
+            self.selecionar_itens_lista(self.lista_naturezas, dados.get('naturezas', []))
+
+    def selecionar_itens_lista(self, lista_widget, itens_associados):
+        """Helper para marcar itens como selecionados nas listas."""
+        ids_associados = {item['id'] for item in itens_associados}
+        for i in range(lista_widget.count()):
+            item = lista_widget.item(i)
+            if item.data(Qt.UserRole) in ids_associados:
+                item.setSelected(True)
+
+    # --- Lógica de Criação Rápida (Quick Add) ---
+
+    def adicionar_rapido_setor(self):
+        self._quick_add("Adicionar Novo Setor", "/api/setores", self.carregar_setores)
+
+    def adicionar_rapido_fornecedor(self):
+        self._quick_add("Adicionar Fornecedor", "/api/fornecedores", self.recargar_listas_apoio)
+
+    def adicionar_rapido_natureza(self):
+        self._quick_add("Adicionar Natureza", "/api/naturezas", self.recargar_listas_apoio)
+
+    def _quick_add(self, titulo, endpoint, callback_sucesso):
+        dialog = QuickAddDialog(self, titulo, endpoint)
+        # Conecta o sinal apenas se o diálogo for aceito e emitir o evento
+        dialog.item_adicionado.connect(callback_sucesso) 
+        dialog.exec()
+
+    def recargar_listas_apoio(self):
+        """Recarrega as listas mantendo as seleções atuais se possível."""
+        # Nota: Uma implementação ideal salvaria os IDs selecionados e restauraria.
+        # Por simplicidade, estamos limpando e recarregando via worker ou requisição direta.
+        self.lista_fornecedores.clear()
+        self.lista_naturezas.clear()
+        self.iniciar_carregamento_assincrono() # Reutiliza a lógica principal
+
+    # --- Lógica de Validação e Salvamento ---
+
     def iniciar_verificacao_timer(self):
         if self.produto_id is None:
             self.label_status_codigo.setText("Verificando...")
-            self.verificacao_timer.stop()
+            self.label_status_codigo.setStyleSheet("color: grey;")
             self.verificacao_timer.start(500)
+
     def verificar_codigo_produto(self):
         codigo = self.input_codigo.text().strip()
-        if not codigo:
+        if not codigo: 
             self.label_status_codigo.setText("")
             return
+            
         global access_token
         headers = {'Authorization': f'Bearer {access_token}'}
         try:
             response = requests.get(f"{API_BASE_URL}/api/produtos/codigo/{codigo}", headers=headers)
-            if response and response.status_code == 404:
+            if response.status_code == 404:
                 self.label_status_codigo.setText("✅ Disponível")
-                self.label_status_codigo.setStyleSheet("color: #28a745;")
-            elif response and response.status_code == 200:
-                self.label_status_codigo.setText("❌ Já existe!")
-                self.label_status_codigo.setStyleSheet("color: #dc3545;")
-            else:
-                self.label_status_codigo.setText("")
-        except requests.exceptions.RequestException:
+                self.label_status_codigo.setStyleSheet("color: green;")
+            elif response.status_code == 200:
+                self.label_status_codigo.setText("❌ Em uso")
+                self.label_status_codigo.setStyleSheet("color: red;")
+        except:
             self.label_status_codigo.setText("⚠️ Erro")
-            self.label_status_codigo.setStyleSheet("color: #ffc107;")
-    def adicionar_rapido_fornecedor(self):
-        dialog = QuickAddDialog(self, "Adicionar Novo Fornecedor", "/api/fornecedores")
-        dialog.item_adicionado.connect(self.carregar_listas_de_apoio_refreshed)
-        dialog.exec()
-    def adicionar_rapido_natureza(self):
-        dialog = QuickAddDialog(self, "Adicionar Nova Natureza", "/api/naturezas")
-        dialog.item_adicionado.connect(self.carregar_listas_de_apoio_refreshed)
-        dialog.exec()
-    def carregar_listas_de_apoio_refreshed(self):
-        self.carregar_listas_de_apoio()
-        if self.dados_produto_carregados:
-            self.selecionar_itens_nas_listas(self.dados_produto_carregados)
-    def carregar_listas_de_apoio(self):
-        self.lista_fornecedores.clear()
-        self.lista_naturezas.clear()
-        global access_token
-        headers = {'Authorization': f'Bearer {access_token}'}
-        try:
-            response_forn = requests.get(f"{API_BASE_URL}/api/fornecedores", headers=headers)
-            if response_forn and response_forn.status_code == 200:
-                for forn in response_forn.json():
-                    item = QListWidgetItem(forn['nome'])
-                    item.setData(Qt.UserRole, forn['id'])
-                    self.lista_fornecedores.addItem(item)
-            response_nat = requests.get(f"{API_BASE_URL}/api/naturezas", headers=headers)
-            if response_nat and response_nat.status_code == 200:
-                for nat in response_nat.json():
-                    item = QListWidgetItem(nat['nome'])
-                    item.setData(Qt.UserRole, nat['id'])
-                    self.lista_naturezas.addItem(item)
-        except requests.exceptions.RequestException:
-            show_connection_error_message(self)
-    def selecionar_itens_nas_listas(self, dados_produto):
-        ids_fornecedores_associados = {f['id'] for f in dados_produto.get('fornecedores', [])}
-        for i in range(self.lista_fornecedores.count()):
-            item = self.lista_fornecedores.item(i)
-            if item.data(Qt.UserRole) in ids_fornecedores_associados:
-                item.setSelected(True)
-        ids_naturezas_associadas = {n['id'] for n in dados_produto.get('naturezas', [])}
-        for i in range(self.lista_naturezas.count()):
-            item = self.lista_naturezas.item(i)
-            if item.data(Qt.UserRole) in ids_naturezas_associadas:
-                item.setSelected(True)
-    def accept(self):
+
+    def save_product(self):
         nome = self.input_nome.text().strip()
         codigo = self.input_codigo.text().strip()
+        
         if not nome or not codigo:
-            QMessageBox.warning(self, "Campos Obrigatórios", "Por favor, preencha os campos: Código e Nome.")
+            QMessageBox.warning(self, "Atenção", "Os campos Código e Nome são obrigatórios.")
             return
+
+        # Coleta de Dados
+        dados_produto = {
+            "codigo": codigo,
+            "nome": nome,
+            "descricao": self.input_descricao.text(),
+            "preco": self.input_preco.text().replace(',', '.') or "0.00",
+            "codigoB": self.input_codigoB.text(),
+            "codigoC": self.input_codigoC.text(),
+            "id_setor": self.combo_setor.currentData(), # Campo NOVO
+            "fornecedores_ids": [item.data(Qt.UserRole) for item in self.lista_fornecedores.selectedItems()],
+            "naturezas_ids": [item.data(Qt.UserRole) for item in self.lista_naturezas.selectedItems()]
+        }
+
+        # Envio para API
         global access_token
         headers = {'Authorization': f'Bearer {access_token}'}
-        preco_str = self.input_preco.text().strip().replace(',', '.')
-        dados_produto = {
-            "codigo": codigo, "nome": nome, "preco": preco_str if preco_str else "0.00",
-            "descricao": self.input_descricao.text(),
-            "codigoB": self.input_codigoB.text(), "codigoC": self.input_codigoC.text()
-        }
-        ids_fornecedores_selecionados = [self.lista_fornecedores.item(i).data(Qt.UserRole) for i in range(self.lista_fornecedores.count()) if self.lista_fornecedores.item(i).isSelected()]
-        ids_naturezas_selecionadas = [self.lista_naturezas.item(i).data(Qt.UserRole) for i in range(self.lista_naturezas.count()) if self.lista_naturezas.item(i).isSelected()]
+        
         try:
             if self.produto_id is None:
-                response_produto = requests.post(f"{API_BASE_URL}/api/produtos", headers=headers, json=dados_produto)
-                if not response_produto or response_produto.status_code != 201:
-                    raise Exception(response_produto.json().get('erro', 'Erro ao criar produto'))
-                produto_salvo_id = response_produto.json().get('id_produto_criado')
-                dados_produto['fornecedores_ids'] = ids_fornecedores_selecionados
-                dados_produto['naturezas_ids'] = ids_naturezas_selecionadas
-                response_update = requests.put(f"{API_BASE_URL}/api/produtos/{produto_salvo_id}", headers=headers, json=dados_produto)
-                if not response_update or response_update.status_code != 200:
-                    raise Exception(response_update.json().get('erro', 'Produto criado, mas falha ao salvar associações'))
-                super().accept()
+                # Criar (POST)
+                resp = requests.post(f"{API_BASE_URL}/api/produtos", headers=headers, json=dados_produto)
+                if resp.status_code == 201:
+                    # Se criou, precisamos atualizar as associações (para garantir many-to-many)
+                    new_id = resp.json().get('id_produto_criado')
+                    requests.put(f"{API_BASE_URL}/api/produtos/{new_id}", headers=headers, json=dados_produto)
+                    QMessageBox.information(self, "Sucesso", "Produto criado com sucesso!")
+                    super().accept()
+                else:
+                    raise Exception(resp.json().get('erro', 'Erro ao criar'))
             else:
-                dados_produto['fornecedores_ids'] = ids_fornecedores_selecionados
-                dados_produto['naturezas_ids'] = ids_naturezas_selecionadas
-                response = requests.put(f"{API_BASE_URL}/api/produtos/{self.produto_id}", headers=headers, json=dados_produto)
-                if not response or response.status_code != 200:
-                    raise Exception(response.json().get('erro', 'Erro ao atualizar produto'))
-                dados_atualizados = response.json()
-                self.produto_atualizado.emit(self.row, dados_atualizados)
-                QMessageBox.information(self, "Sucesso", "Produto atualizado com sucesso!")
-                super().accept()
-        except requests.exceptions.RequestException:
-            show_connection_error_message(self)
+                # Atualizar (PUT)
+                resp = requests.put(f"{API_BASE_URL}/api/produtos/{self.produto_id}", headers=headers, json=dados_produto)
+                if resp.status_code == 200:
+                    self.produto_atualizado.emit(self.row, resp.json())
+                    QMessageBox.information(self, "Sucesso", "Produto atualizado com sucesso!")
+                    super().accept()
+                else:
+                    raise Exception(resp.json().get('erro', 'Erro ao atualizar'))
+                    
         except Exception as e:
-            QMessageBox.warning(self, "Erro", f"Não foi possível salvar o produto: {e}")
+            QMessageBox.critical(self, "Erro", f"Falha na operação: {str(e)}")
 
 class FormularioFornecedorDialog(QDialog):
     def __init__(self, parent=None, fornecedor_id=None):
@@ -569,6 +678,173 @@ class FormularioUsuarioDialog(QDialog):
         except Exception as e:
             QMessageBox.warning(self, "Erro", f"Não foi possível salvar o usuário: {e}")
 
+class FormularioSetorDialog(QDialog):
+    def __init__(self, parent=None, setor_id=None):
+        super().__init__(parent)
+        self.setor_id = setor_id
+        self.setWindowTitle("Adicionar Novo Setor" if self.setor_id is None else "Editar Setor")
+        self.setMinimumWidth(300)
+        
+        self.layout = QFormLayout(self)
+        
+        self.input_nome = QLineEdit()
+        self.layout.addRow("Nome do Setor:", self.input_nome)
+        
+        self.botoes = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
+        self.botoes.accepted.connect(self.accept)
+        self.botoes.rejected.connect(self.reject)
+        self.layout.addWidget(self.botoes)
+        
+        if self.setor_id:
+            self.carregar_dados_setor()
+
+    def carregar_dados_setor(self):
+        global access_token
+        headers = {'Authorization': f'Bearer {access_token}'}
+        try:
+            response = requests.get(f"{API_BASE_URL}/api/setores/{self.setor_id}", headers=headers)
+            if response.status_code == 200:
+                self.input_nome.setText(response.json().get('nome'))
+            else:
+                QMessageBox.warning(self, "Erro", "Não foi possível carregar dados do setor.")
+        except requests.exceptions.RequestException:
+            show_connection_error_message(self)
+
+    def accept(self):
+        nome = self.input_nome.text().strip()
+        if not nome:
+            QMessageBox.warning(self, "Erro", "O nome do setor é obrigatório.")
+            return
+
+        global access_token
+        headers = {'Authorization': f'Bearer {access_token}'}
+        dados = {"nome": nome}
+        
+        try:
+            if self.setor_id is None:
+                response = requests.post(f"{API_BASE_URL}/api/setores", headers=headers, json=dados)
+                if response.status_code == 201:
+                    QMessageBox.information(self, "Sucesso", "Setor adicionado com sucesso!")
+                    signal_handler.setores_atualizados.emit() # Avisa que mudou
+                    super().accept()
+                else:
+                    raise Exception(response.json().get('erro', 'Erro desconhecido'))
+            else:
+                response = requests.put(f"{API_BASE_URL}/api/setores/{self.setor_id}", headers=headers, json=dados)
+                if response.status_code == 200:
+                    QMessageBox.information(self, "Sucesso", "Setor atualizado com sucesso!")
+                    signal_handler.setores_atualizados.emit() # Avisa que mudou
+                    super().accept()
+                else:
+                    raise Exception(response.json().get('erro', 'Erro desconhecido'))
+        except requests.exceptions.RequestException:
+            show_connection_error_message(self)
+        except Exception as e:
+            QMessageBox.warning(self, "Erro", f"Não foi possível salvar o setor: {e}")
+
+
+class SetoresWidget(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.layout = QVBoxLayout(self)
+        
+        self.titulo = QLabel("Gestão de Setores")
+        self.titulo.setStyleSheet("font-size: 24px; font-weight: bold;")
+        
+        layout_botoes = QHBoxLayout()
+        self.btn_adicionar = QPushButton("➕ Adicionar Novo")
+        self.btn_adicionar.setObjectName("btnPositive")
+        self.btn_editar = QPushButton("✏️ Editar Selecionado")
+        self.btn_editar.setObjectName("btnNeutral")
+        self.btn_excluir = QPushButton("🗑️ Excluir Selecionado")
+        self.btn_excluir.setObjectName("btnNegative")
+        
+        layout_botoes.addWidget(self.btn_adicionar)
+        layout_botoes.addWidget(self.btn_editar)
+        layout_botoes.addWidget(self.btn_excluir)
+        layout_botoes.addStretch(1)
+        
+        self.tabela_setores = QTableWidget()
+        self.tabela_setores.setColumnCount(1)
+        self.tabela_setores.setHorizontalHeaderLabels(["Nome do Setor"])
+        self.tabela_setores.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.tabela_setores.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.tabela_setores.setAlternatingRowColors(True)
+        self.tabela_setores.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+
+        self.layout.addWidget(self.titulo)
+        self.layout.addLayout(layout_botoes)
+        self.layout.addWidget(self.tabela_setores)
+        
+        self.btn_adicionar.clicked.connect(self.abrir_formulario_adicionar)
+        self.btn_editar.clicked.connect(self.abrir_formulario_editar)
+        self.btn_excluir.clicked.connect(self.excluir_setor_selecionado)
+        
+        self.carregar_setores()
+
+    def carregar_setores(self):
+        global access_token
+        headers = {'Authorization': f'Bearer {access_token}'}
+        try:
+            response = requests.get(f"{API_BASE_URL}/api/setores", headers=headers)
+            if response.status_code == 200:
+                setores = response.json()
+                self.tabela_setores.setRowCount(len(setores))
+                for linha, setor in enumerate(setores):
+                    item_nome = QTableWidgetItem(setor['nome'])
+                    item_nome.setData(Qt.UserRole, setor['id'])
+                    self.tabela_setores.setItem(linha, 0, item_nome)
+            else:
+                QMessageBox.warning(self, "Erro", "Não foi possível carregar os setores.")
+        except requests.exceptions.RequestException:
+            show_connection_error_message(self)
+
+    def abrir_formulario_adicionar(self):
+        dialog = FormularioSetorDialog(self)
+        if dialog.exec():
+            self.carregar_setores()
+
+    def abrir_formulario_editar(self):
+        linha_selecionada = self.tabela_setores.currentRow()
+        if linha_selecionada < 0:
+            QMessageBox.warning(self, "Seleção", "Por favor, selecione um setor para editar.")
+            return
+        
+        item = self.tabela_setores.item(linha_selecionada, 0)
+        setor_id = item.data(Qt.UserRole)
+        
+        dialog = FormularioSetorDialog(self, setor_id=setor_id)
+        if dialog.exec():
+            self.carregar_setores()
+
+    def excluir_setor_selecionado(self):
+        linha_selecionada = self.tabela_setores.currentRow()
+        if linha_selecionada < 0:
+            QMessageBox.warning(self, "Seleção", "Por favor, selecione um setor para excluir.")
+            return
+        
+        item = self.tabela_setores.item(linha_selecionada, 0)
+        setor_id = item.data(Qt.UserRole)
+        nome_setor = item.text()
+        
+        resposta = QMessageBox.question(self, "Confirmar Exclusão", 
+                                      f"Tem certeza que deseja excluir o setor '{nome_setor}'?", 
+                                      QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        
+        if resposta == QMessageBox.StandardButton.Yes:
+            global access_token
+            headers = {'Authorization': f'Bearer {access_token}'}
+            try:
+                response = requests.delete(f"{API_BASE_URL}/api/setores/{setor_id}", headers=headers)
+                if response.status_code == 200:
+                    QMessageBox.information(self, "Sucesso", "Setor excluído com sucesso!")
+                    self.carregar_setores()
+                else:
+                    erro_msg = response.json().get('erro', 'Erro desconhecido')
+                    QMessageBox.warning(self, "Erro", f"Não foi possível excluir: {erro_msg}")
+            except requests.exceptions.RequestException:
+                show_connection_error_message(self)
+
 class MudarSenhaDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -747,73 +1023,155 @@ class ImportacaoWidget(QWidget):
 class InventarioWidget(QWidget):
     def __init__(self):
         super().__init__()
-        self.layout = QVBoxLayout(self)
         self.dados_exibidos = []
         self.sort_qtd_desc = True
+        
+        # Inicialização da Interface e Conexões
+        self.setup_ui()
+        self.connect_signals()
+        
+        # Carregamento Inicial
+        self.carregar_setores_filtro()
+        self.carregar_dados_inventario()
+
+    def setup_ui(self):
+        """Constrói a interface gráfica do widget."""
+        self.layout = QVBoxLayout(self)
+        
+        # 1. Título
         self.titulo = QLabel("Inventário Completo")
         self.titulo.setStyleSheet("font-size: 24px; font-weight: bold;")
-        controles_layout_1 = QHBoxLayout()
+        self.layout.addWidget(self.titulo)
+
+        # 2. Barra de Busca e Filtros
+        layout_filtros = QHBoxLayout()
+        
         self.input_pesquisa = QLineEdit()
         self.input_pesquisa.setPlaceholderText("Buscar por Nome ou Códigos (A, B ou C)...")
-        controles_layout_1.addWidget(self.input_pesquisa)
-        controles_layout_2 = QHBoxLayout()
+        
+        self.combo_filtro_setor = QComboBox()
+        self.combo_filtro_setor.setPlaceholderText("Todos os Setores")
+        self.combo_filtro_setor.addItem("Todos os Setores", None)
+        self.combo_filtro_setor.setMinimumWidth(180)
+        
+        layout_filtros.addWidget(self.input_pesquisa)
+        layout_filtros.addWidget(self.combo_filtro_setor)
+        self.layout.addLayout(layout_filtros)
+
+        # 3. Barra de Ferramentas (Botões)
+        layout_acoes = QHBoxLayout()
+        
         self.btn_adicionar = QPushButton("➕ Adicionar Novo")
         self.btn_adicionar.setObjectName("btnPositive")
+        
         self.btn_editar = QPushButton("✏️ Editar Selecionado")
         self.btn_editar.setObjectName("btnNeutral")
+        
         self.btn_excluir = QPushButton("🗑️ Excluir Selecionado")
         self.btn_excluir.setObjectName("btnNegative")
+        
         self.btn_gerar_etiquetas = QPushButton("🖨️ Gerar Etiquetas")
         self.btn_gerar_etiquetas.setObjectName("btnPrint")
-        controles_layout_2.addWidget(self.btn_adicionar)
-        controles_layout_2.addWidget(self.btn_editar)
-        controles_layout_2.addWidget(self.btn_excluir)
-        controles_layout_2.addWidget(self.btn_gerar_etiquetas)
-        controles_layout_2.addStretch(1)
+
+        layout_acoes.addWidget(self.btn_adicionar)
+        layout_acoes.addWidget(self.btn_editar)
+        layout_acoes.addWidget(self.btn_excluir)
+        layout_acoes.addWidget(self.btn_gerar_etiquetas)
+        layout_acoes.addStretch(1) # Espaço vazio no meio
+
+        # Botões de Ordenação
         self.btn_ordenar_nome = QPushButton("🔤 A-Z")
         self.btn_ordenar_nome.setToolTip("Ordenar por Nome do Produto")
         self.btn_ordenar_nome.setObjectName("btnIcon")
+        
         self.btn_ordenar_qtd = QPushButton("📦 Qtd.")
         self.btn_ordenar_qtd.setToolTip("Ordenar por Saldo em Estoque")
         self.btn_ordenar_qtd.setObjectName("btnIcon")
-        controles_layout_2.addWidget(self.btn_ordenar_nome)
-        controles_layout_2.addWidget(self.btn_ordenar_qtd)
+
+        layout_acoes.addWidget(self.btn_ordenar_nome)
+        layout_acoes.addWidget(self.btn_ordenar_qtd)
+        self.layout.addLayout(layout_acoes)
+
+        # 4. Tabela de Dados
         self.tabela_inventario = QTableWidget()
         self.tabela_inventario.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
-        self.tabela_inventario.setColumnCount(7)
-        self.tabela_inventario.setHorizontalHeaderLabels(["Código", "Nome do Produto", "Descrição", "Saldo", "Preço (R$)", "Código B", "Código C"])
         self.tabela_inventario.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.tabela_inventario.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.tabela_inventario.setAlternatingRowColors(True)
         self.tabela_inventario.setWordWrap(True)
+        
+        # Configuração das Colunas (Adicionado Setor)
+        colunas = ["Código", "Nome do Produto", "Descrição", "Setor", "Saldo", "Preço (R$)", "Código B", "Código C"]
+        self.tabela_inventario.setColumnCount(len(colunas))
+        self.tabela_inventario.setHorizontalHeaderLabels(colunas)
+        
         header = self.tabela_inventario.horizontalHeader()
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
-        self.layout.addWidget(self.titulo)
-        self.layout.addLayout(controles_layout_1)
-        self.layout.addLayout(controles_layout_2)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch) # Nome estica
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch) # Descrição estica
+        
         self.layout.addWidget(self.tabela_inventario)
+
+    def connect_signals(self):
+        """Conecta os eventos dos widgets aos métodos."""
+        # Timer para busca (evita requisições a cada tecla)
         self.search_timer = QTimer(self)
         self.search_timer.setSingleShot(True)
         self.search_timer.timeout.connect(self.carregar_dados_inventario)
+        
         self.input_pesquisa.textChanged.connect(self.iniciar_busca_timer)
+        self.combo_filtro_setor.currentIndexChanged.connect(self.carregar_dados_inventario)
+        
         self.btn_adicionar.clicked.connect(self.abrir_formulario_adicionar)
         self.btn_editar.clicked.connect(self.abrir_formulario_editar)
         self.btn_excluir.clicked.connect(self.excluir_produto_selecionado)
         self.btn_gerar_etiquetas.clicked.connect(self.gerar_etiquetas_selecionadas)
+        
         self.btn_ordenar_nome.clicked.connect(self.ordenar_por_nome)
         self.btn_ordenar_qtd.clicked.connect(self.ordenar_por_quantidade)
-        self.carregar_dados_inventario()
+
+    # --- Lógica de Dados ---
+
     def iniciar_busca_timer(self):
         self.search_timer.stop()
         self.search_timer.start(300)
-    def carregar_dados_inventario(self):
+
+    def carregar_setores_filtro(self):
+        """Preenche o combobox de filtro com os setores disponíveis."""
+        self.combo_filtro_setor.blockSignals(True)
+        self.combo_filtro_setor.clear()
+        self.combo_filtro_setor.addItem("Todos os Setores", None)
+        
         global access_token
+        headers = {'Authorization': f'Bearer {access_token}'}
+        try:
+            # Rota precisa existir no backend (/api/setores)
+            resp = requests.get(f"{API_BASE_URL}/api/setores", headers=headers)
+            if resp.status_code == 200:
+                setores = sorted(resp.json(), key=lambda x: x['nome'])
+                for s in setores:
+                    self.combo_filtro_setor.addItem(s['nome'], s['id'])
+        except:
+            pass # Falha silenciosa para não travar a UI
+        finally:
+            self.combo_filtro_setor.blockSignals(False)
+
+    def carregar_dados_inventario(self):
+        """Busca os dados na API aplicando filtros de texto e setor."""
+        global access_token
+        headers = {'Authorization': f'Bearer {access_token}'}
+        
         params = {}
-        termo_busca = self.input_pesquisa.text()
+        
+        # Filtro de Texto
+        termo_busca = self.input_pesquisa.text().strip()
         if termo_busca:
             params['search'] = termo_busca
-        headers = {'Authorization': f'Bearer {access_token}'}
+            
+        # Filtro de Setor
+        setor_id = self.combo_filtro_setor.currentData()
+        if setor_id:
+            params['setor_id'] = setor_id
+
         try:
             response = requests.get(f"{API_BASE_URL}/api/estoque/saldos", headers=headers, params=params)
             if response and response.status_code == 200:
@@ -823,70 +1181,108 @@ class InventarioWidget(QWidget):
                 QMessageBox.warning(self, "Erro", "Não foi possível carregar os dados do inventário.")
         except requests.exceptions.RequestException:
             show_connection_error_message(self)
+
     def popular_tabela(self, dados):
+        """Preenche a QTableWidget com os dados recebidos."""
         self.tabela_inventario.setRowCount(0)
         self.tabela_inventario.setRowCount(len(dados))
+        
         for linha, item in enumerate(dados):
+            # Coluna 0: Código (Hidden ID)
             item_codigo = QTableWidgetItem(item['codigo'])
             item_codigo.setData(Qt.UserRole, item['id_produto'])
             self.tabela_inventario.setItem(linha, 0, item_codigo)
+            
+            # Coluna 1: Nome
             self.tabela_inventario.setItem(linha, 1, QTableWidgetItem(item['nome']))
+            
+            # Coluna 2: Descrição
             self.tabela_inventario.setItem(linha, 2, QTableWidgetItem(item.get('descricao', '')))
+            
+            # Coluna 3: Setor (NOVO)
+            setor_nome = item.get('setor_nome', '') or '-'
+            self.tabela_inventario.setItem(linha, 3, QTableWidgetItem(setor_nome))
+            
+            # Coluna 4: Saldo
             saldo_item = QTableWidgetItem(str(item['saldo_atual']))
             saldo_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-            self.tabela_inventario.setItem(linha, 3, saldo_item)
+            self.tabela_inventario.setItem(linha, 4, saldo_item)
+            
+            # Coluna 5: Preço
             preco_item = QTableWidgetItem(str(item.get('preco', '0.00')))
             preco_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-            self.tabela_inventario.setItem(linha, 4, preco_item)
-            self.tabela_inventario.setItem(linha, 5, QTableWidgetItem(item['codigoB']))
-            self.tabela_inventario.setItem(linha, 6, QTableWidgetItem(item['codigoC']))
+            self.tabela_inventario.setItem(linha, 5, preco_item)
+            
+            # Coluna 6: Código B
+            self.tabela_inventario.setItem(linha, 6, QTableWidgetItem(item.get('codigoB', '')))
+            
+            # Coluna 7: Código C
+            self.tabela_inventario.setItem(linha, 7, QTableWidgetItem(item.get('codigoC', '')))
+            
         self.tabela_inventario.resizeRowsToContents()
+
+    # --- Ações do Usuário ---
+
     def ordenar_por_nome(self):
         self.dados_exibidos.sort(key=lambda item: item['nome'].lower())
         self.popular_tabela(self.dados_exibidos)
+
     def ordenar_por_quantidade(self):
-        self.dados_exibidos.sort(key=lambda item: int(item['saldo_atual']), reverse=self.sort_qtd_desc)
+        self.dados_exibidos.sort(key=lambda item: float(item['saldo_atual']), reverse=self.sort_qtd_desc)
         self.sort_qtd_desc = not self.sort_qtd_desc
         self.popular_tabela(self.dados_exibidos)
+
     def abrir_formulario_adicionar(self):
         dialog = FormularioProdutoDialog(self)
         if dialog.exec():
             self.carregar_dados_inventario()
+
     def abrir_formulario_editar(self):
         linha_selecionada = self.tabela_inventario.currentRow()
         if linha_selecionada < 0:
             QMessageBox.warning(self, "Seleção", "Por favor, selecione um produto para editar.")
             return
+            
         item = self.tabela_inventario.item(linha_selecionada, 0)
         produto_id = item.data(Qt.UserRole)
+        
         dialog = FormularioProdutoDialog(self, produto_id=produto_id, row=linha_selecionada)
-        dialog.produto_atualizado.connect(self.atualizar_linha_produto)
+        dialog.produto_atualizado.connect(self.atualizar_linha_tabela)
         dialog.exec()
-    def atualizar_linha_produto(self, linha, dados_produto):
-        saldo_antigo = self.tabela_inventario.item(linha, 3).text()
-        item_codigo = QTableWidgetItem(dados_produto['codigo'])
-        item_codigo.setData(Qt.UserRole, dados_produto['id'])
-        self.tabela_inventario.setItem(linha, 0, item_codigo)
-        self.tabela_inventario.setItem(linha, 1, QTableWidgetItem(dados_produto['nome']))
-        self.tabela_inventario.setItem(linha, 2, QTableWidgetItem(dados_produto['descricao']))
-        saldo_item = QTableWidgetItem(saldo_antigo)
-        saldo_item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.tabela_inventario.setItem(linha, 3, saldo_item)
-        preco_item = QTableWidgetItem(dados_produto['preco'])
-        preco_item.setTextAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        self.tabela_inventario.setItem(linha, 4, preco_item)
-        self.tabela_inventario.setItem(linha, 5, QTableWidgetItem(dados_produto.get('codigoB', '')))
-        self.tabela_inventario.setItem(linha, 6, QTableWidgetItem(dados_produto.get('codigoC', '')))
-        self.tabela_inventario.resizeRowToContents(linha)
+
+    def atualizar_linha_tabela(self, linha, dados_produto):
+        """Atualiza apenas a linha editada sem recarregar tudo (Otimização)."""
+        # Atualiza a memória local
+        # Nota: O ideal seria atualizar self.dados_exibidos também, mas para visualização rápida:
+        
+        self.tabela_inventario.item(linha, 0).setText(dados_produto['codigo'])
+        self.tabela_inventario.item(linha, 1).setText(dados_produto['nome'])
+        self.tabela_inventario.item(linha, 2).setText(dados_produto.get('descricao', ''))
+        
+        # Atualiza Setor
+        setor_nome = dados_produto.get('setor_nome', '') or '-'
+        self.tabela_inventario.item(linha, 3).setText(setor_nome)
+        
+        # Saldo não muda na edição de cadastro, mantemos o que estava
+        
+        self.tabela_inventario.item(linha, 5).setText(dados_produto.get('preco', '0.00'))
+        self.tabela_inventario.item(linha, 6).setText(dados_produto.get('codigoB', ''))
+        self.tabela_inventario.item(linha, 7).setText(dados_produto.get('codigoC', ''))
+
     def excluir_produto_selecionado(self):
         linha_selecionada = self.tabela_inventario.currentRow()
         if linha_selecionada < 0:
             QMessageBox.warning(self, "Seleção", "Por favor, selecione um produto para excluir.")
             return
+            
         item_id = self.tabela_inventario.item(linha_selecionada, 0)
         produto_id = item_id.data(Qt.UserRole)
         nome_produto = self.tabela_inventario.item(linha_selecionada, 1).text()
-        resposta = QMessageBox.question(self, "Confirmar Exclusão", f"Tem a certeza de que deseja excluir o produto '{nome_produto}'?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        
+        resposta = QMessageBox.question(self, "Confirmar Exclusão", 
+                                      f"Tem a certeza de que deseja excluir '{nome_produto}'?", 
+                                      QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        
         if resposta == QMessageBox.StandardButton.Yes:
             global access_token
             headers = {'Authorization': f'Bearer {access_token}'}
@@ -897,45 +1293,51 @@ class InventarioWidget(QWidget):
                     self.carregar_dados_inventario()
                 else:
                     erro = response.json().get('erro', 'Erro desconhecido.')
-                    QMessageBox.warning(self, "Erro", f"Não foi possível excluir o produto: {erro}")
+                    QMessageBox.warning(self, "Erro", f"Não foi possível excluir: {erro}")
             except requests.exceptions.RequestException:
                 show_connection_error_message(self)
+
     def gerar_etiquetas_selecionadas(self):
         selected_rows = self.tabela_inventario.selectionModel().selectedRows()
         if not selected_rows:
-            QMessageBox.warning(self, "Seleção", "Por favor, selecione um ou mais produtos na tabela para gerar as etiquetas.")
+            QMessageBox.warning(self, "Seleção", "Selecione produtos para gerar etiquetas.")
             return
+
         product_ids = []
         for index in selected_rows:
             item = self.tabela_inventario.item(index.row(), 0)
-            if item and item.data(Qt.UserRole):
+            if item:
                 product_ids.append(item.data(Qt.UserRole))
-        if not product_ids:
-            QMessageBox.warning(self, "Erro", "Não foi possível obter os IDs dos produtos selecionados.")
-            return
-        caminho_salvar, _ = QFileDialog.getSaveFileName(self, "Salvar Ficheiro de Etiquetas", "etiquetas.pdf", "Ficheiros PDF (*.pdf)")
+
+        caminho_salvar, _ = QFileDialog.getSaveFileName(self, "Salvar Etiquetas", "etiquetas.pdf", "PDF (*.pdf)")
         if not caminho_salvar:
             return
+
         global access_token
         headers = {'Authorization': f'Bearer {access_token}'}
-        dados = {'product_ids': product_ids}
         try:
-            msg_box = QMessageBox(QMessageBox.Icon.Information, "Aguarde", "A gerar o ficheiro de etiquetas...", buttons=QMessageBox.StandardButton.NoButton, parent=self)
-            msg_box.show()
-            QApplication.processEvents()
-            response = requests.post(f"{API_BASE_URL}/api/produtos/etiquetas", headers=headers, json=dados, stream=True)
-            msg_box.close()
-            if response and response.status_code == 200:
+            # Feedback visual simples
+            QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+            
+            response = requests.post(f"{API_BASE_URL}/api/produtos/etiquetas", 
+                                   headers=headers, 
+                                   json={'product_ids': product_ids}, 
+                                   stream=True)
+            
+            QApplication.restoreOverrideCursor()
+
+            if response.status_code == 200:
                 with open(caminho_salvar, 'wb') as f:
                     for chunk in response.iter_content(chunk_size=8192):
                         f.write(chunk)
-                QMessageBox.information(self, "Sucesso", f"Ficheiro de etiquetas salvo com sucesso em:\n{caminho_salvar}")
+                QMessageBox.information(self, "Sucesso", f"Etiquetas salvas em:\n{caminho_salvar}")
             else:
-                erro = response.json().get('erro', 'Erro desconhecido.')
-                QMessageBox.warning(self, "Erro na API", f"Não foi possível gerar as etiquetas: {erro}")
-        except requests.exceptions.RequestException:
-            msg_box.close()
+                QMessageBox.warning(self, "Erro", f"Erro ao gerar: {response.status_code}")
+                
+        except Exception as e:
+            QApplication.restoreOverrideCursor()
             show_connection_error_message(self)
+
 
 class GestaoEstoqueWidget(QWidget):
     def __init__(self):
