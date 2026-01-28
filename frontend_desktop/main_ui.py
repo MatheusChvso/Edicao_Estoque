@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtGui import (
     QPixmap, QAction, QDoubleValidator, QKeySequence, QIcon
-)
+)       
 from PySide6.QtCore import (
     Qt, QTimer, Signal, QDate, QEvent, QObject, QThread, QUrl
 )
@@ -569,37 +569,51 @@ class FormularioNaturezaDialog(QDialog):
 
 class QuickAddDialog(QDialog):
     item_adicionado = Signal()
+
     def __init__(self, parent, titulo, endpoint):
         super().__init__(parent)
         self.setWindowTitle(titulo)
         self.endpoint = endpoint
         self.setMinimumWidth(300)
+        
         self.layout = QVBoxLayout(self)
         self.form_layout = QFormLayout()
+        
         self.input_nome = QLineEdit()
         self.form_layout.addRow("Nome:", self.input_nome)
+        
         self.botoes = QDialogButtonBox(QDialogButtonBox.Save | QDialogButtonBox.Cancel)
         self.layout.addLayout(self.form_layout)
         self.layout.addWidget(self.botoes)
+        
         self.botoes.accepted.connect(self.accept)
         self.botoes.rejected.connect(self.reject)
+
     def accept(self):
         nome = self.input_nome.text().strip()
         if not nome:
             QMessageBox.warning(self, "Erro", "O campo de nome não pode estar vazio.")
             return
+            
         global access_token
         headers = {'Authorization': f'Bearer {access_token}'}
         dados = {"nome": nome}
+        
         try:
             response = requests.post(f"{API_BASE_URL}{self.endpoint}", headers=headers, json=dados)
             if response.status_code == 201:
                 QMessageBox.information(self, "Sucesso", "Item adicionado com sucesso!")
                 self.item_adicionado.emit()
+                
+                # --- CORREÇÃO AQUI: Avisar os componentes corretos ---
                 if self.endpoint == "/api/fornecedores":
                     signal_handler.fornecedores_atualizados.emit()
                 elif self.endpoint == "/api/naturezas":
                     signal_handler.naturezas_atualizadas.emit()
+                elif self.endpoint == "/api/setores":  # <--- NOVA LINHA
+                    signal_handler.setores_atualizados.emit()
+                # -----------------------------------------------------
+                
                 super().accept()
             else:
                 raise Exception(response.json().get('erro', 'Erro desconhecido'))
@@ -1120,6 +1134,8 @@ class InventarioWidget(QWidget):
         
         self.input_pesquisa.textChanged.connect(self.iniciar_busca_timer)
         self.combo_filtro_setor.currentIndexChanged.connect(self.carregar_dados_inventario)
+        
+        signal_handler.setores_atualizados.connect(self.carregar_setores_filtro)
         
         self.btn_adicionar.clicked.connect(self.abrir_formulario_adicionar)
         self.btn_editar.clicked.connect(self.abrir_formulario_editar)
