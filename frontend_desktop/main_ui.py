@@ -600,6 +600,8 @@ class QuickAddDialog(QDialog):
                     signal_handler.fornecedores_atualizados.emit()
                 elif self.endpoint == "/api/naturezas":
                     signal_handler.naturezas_atualizadas.emit()
+                elif self.endpoint == "/api/setores":  # <--- Adicione isto
+                    signal_handler.setores_atualizados.emit()    
                 super().accept()
             else:
                 raise Exception(response.json().get('erro', 'Erro desconhecido'))
