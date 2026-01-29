@@ -715,7 +715,7 @@ class FormularioSetorDialog(QDialog):
     def accept(self):
         nome = self.input_nome.text().strip()
         if not nome:
-            QMessageBox.warning(self, "Erro", "O nome do setor é obrigatório.")
+            QMessageBox.warning(self, "Campo Obrigatório", "Por favor, preencha o nome do setor.")
             return
 
         global access_token
@@ -725,24 +725,30 @@ class FormularioSetorDialog(QDialog):
         try:
             if self.setor_id is None:
                 response = requests.post(f"{API_BASE_URL}/api/setores", headers=headers, json=dados)
-                if response.status_code == 201:
-                    QMessageBox.information(self, "Sucesso", "Setor adicionado com sucesso!")
-                    signal_handler.setores_atualizados.emit() # Avisa que mudou
-                    super().accept()
-                else:
-                    raise Exception(response.json().get('erro', 'Erro desconhecido'))
+                status_esperado = 201
+                msg_sucesso = "Setor adicionado com sucesso!"
             else:
                 response = requests.put(f"{API_BASE_URL}/api/setores/{self.setor_id}", headers=headers, json=dados)
-                if response.status_code == 200:
-                    QMessageBox.information(self, "Sucesso", "Setor atualizado com sucesso!")
-                    signal_handler.setores_atualizados.emit() # Avisa que mudou
-                    super().accept()
+                status_esperado = 200
+                msg_sucesso = "Setor atualizado com sucesso!"
+
+            if response.status_code == status_esperado:
+                QMessageBox.information(self, "Sucesso", msg_sucesso)
+                signal_handler.setores_atualizados.emit()
+                super().accept()
+            else:
+                erro_msg = response.json().get('erro', 'Erro desconhecido')
+                # Tratamento amigável para erro de tabela inexistente
+                if "doesn't exist" in str(erro_msg) or "no such table" in str(erro_msg):
+                    QMessageBox.warning(self, "Atualização Necessária", 
+                        "O sistema precisa de uma atualização no banco de dados para usar Setores.\nContate o suporte.")
                 else:
-                    raise Exception(response.json().get('erro', 'Erro desconhecido'))
+                    QMessageBox.warning(self, "Erro", f"Não foi possível salvar: {erro_msg}")
+                    
         except requests.exceptions.RequestException:
             show_connection_error_message(self)
         except Exception as e:
-            QMessageBox.warning(self, "Erro", f"Não foi possível salvar o setor: {e}")
+             QMessageBox.critical(self, "Erro Crítico", f"Ocorreu um erro: {str(e)}")
 
 
 class SetoresWidget(QWidget):
@@ -797,9 +803,10 @@ class SetoresWidget(QWidget):
                     item_nome.setData(Qt.UserRole, setor['id'])
                     self.tabela_setores.setItem(linha, 0, item_nome)
             else:
-                QMessageBox.warning(self, "Erro", "Não foi possível carregar os setores.")
+                # Silencioso ou log leve, para não spammar erro ao abrir
+                print("Não foi possível carregar setores.")
         except requests.exceptions.RequestException:
-            show_connection_error_message(self)
+            pass # Evita travar a UI se cair a net
 
     def abrir_formulario_adicionar(self):
         dialog = FormularioSetorDialog(self)
@@ -2111,6 +2118,7 @@ class JanelaPrincipal(QMainWindow):
             self.tela_usuarios = None
             self.tela_importacao = ImportacaoWidget()
             self.tela_terminal = TerminalWidget()
+            self.tela_setores = SetoresWidget()
             self.stacked_widget.addWidget(self.tela_dashboard)
             self.stacked_widget.addWidget(self.tela_gestao_estoque)
             self.stacked_widget.addWidget(self.tela_entrada_rapida)
@@ -2120,6 +2128,7 @@ class JanelaPrincipal(QMainWindow):
             self.stacked_widget.addWidget(self.tela_naturezas)
             self.stacked_widget.addWidget(self.tela_importacao)
             self.stacked_widget.addWidget(self.tela_terminal)
+            self.stacked_widget.addWidget(self.tela_setores)
             menu_bar = self.menuBar()
             menu_arquivo = menu_bar.addMenu("&Arquivo")
             acao_dashboard = QAction("Dashboard", self)
@@ -2150,6 +2159,9 @@ class JanelaPrincipal(QMainWindow):
             self.acao_naturezas = QAction("Naturezas...", self)
             self.acao_naturezas.triggered.connect(self.mostrar_tela_naturezas)
             self.menu_cadastros.addAction(self.acao_naturezas)
+            self.acao_setores = QAction("Setores...", self)
+            self.acao_setores.triggered.connect(self.mostrar_tela_setores)
+            self.menu_cadastros.addAction(self.acao_setores)
             self.menu_cadastros.addSeparator()
             acao_importar = QAction("Importar Produtos de CSV...", self)
             acao_importar.triggered.connect(self.mostrar_tela_importacao)
@@ -2231,6 +2243,7 @@ class JanelaPrincipal(QMainWindow):
             self.tela_importacao.produtos_importados_sucesso.connect(self.tela_gestao_estoque.inventario_view.carregar_dados_inventario)
             signal_handler.fornecedores_atualizados.connect(self.tela_fornecedores.carregar_fornecedores)
             signal_handler.naturezas_atualizadas.connect(self.tela_naturezas.carregar_naturezas)
+            signal_handler.setores_atualizados.connect(self.tela_setores.carregar_setores)
             self.statusBar().showMessage("Pronto.")
         except Exception as e:
             error_log_path = os.path.join(os.path.expanduser("~"), "Desktop", "crash_log.txt")
@@ -2290,7 +2303,8 @@ class JanelaPrincipal(QMainWindow):
     def mostrar_tela_terminal(self):
         self.stacked_widget.setCurrentWidget(self.tela_terminal)
         self.tela_terminal.setFocus()
-
+    def mostrar_tela_setores(self):
+        self.stacked_widget.setCurrentWidget(self.tela_setores) 
 class SobreDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
