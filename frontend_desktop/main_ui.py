@@ -764,11 +764,15 @@ class SetoresWidget(QWidget):
         self.btn_adicionar.setObjectName("btnPositive")
         self.btn_editar = QPushButton("✏️ Editar Selecionado")
         self.btn_editar.setObjectName("btnNeutral")
+        self.btn_imprimir = QPushButton("🖨️ Imprimir Relação")
+        self.btn_imprimir.setObjectName("btnNeutral")
+        self.btn_imprimir.setToolTip("Gera um PDF com os produtos deste setor para colagem.")
         self.btn_excluir = QPushButton("🗑️ Excluir Selecionado")
         self.btn_excluir.setObjectName("btnNegative")
         
         layout_botoes.addWidget(self.btn_adicionar)
         layout_botoes.addWidget(self.btn_editar)
+        layout_botoes.addWidget(self.btn_imprimir)
         layout_botoes.addWidget(self.btn_excluir)
         layout_botoes.addStretch(1)
         
@@ -786,6 +790,7 @@ class SetoresWidget(QWidget):
         
         self.btn_adicionar.clicked.connect(self.abrir_formulario_adicionar)
         self.btn_editar.clicked.connect(self.abrir_formulario_editar)
+        self.btn_imprimir.clicked.connect(self.imprimir_relatorio_setor) # <--- CONECTAR SINAL
         self.btn_excluir.clicked.connect(self.excluir_setor_selecionado)
         
         self.carregar_setores()
@@ -853,6 +858,65 @@ class SetoresWidget(QWidget):
                     QMessageBox.warning(self, "Erro", f"Não foi possível excluir: {erro_msg}")
             except requests.exceptions.RequestException:
                 show_connection_error_message(self)
+                
+    def imprimir_relatorio_setor(self):
+        linha_selecionada = self.tabela_setores.currentRow()
+        if linha_selecionada < 0:
+            QMessageBox.warning(self, "Seleção", "Por favor, selecione um setor para gerar o relatório.")
+            return
+            
+        item = self.tabela_setores.item(linha_selecionada, 0)
+        setor_id = item.data(Qt.UserRole)
+        nome_setor = item.text()
+        
+        # Limpa o nome do arquivo para evitar caracteres inválidos
+        nome_arquivo = "".join(x for x in nome_setor if x.isalnum() or x in " _-")
+        
+        caminho_salvar, _ = QFileDialog.getSaveFileName(
+            self, 
+            "Salvar Relatório do Setor", 
+            f"Relacao_{nome_arquivo}.pdf", 
+            "Arquivos PDF (*.pdf)"
+        )
+        
+        if not caminho_salvar:
+            return
+            
+        global access_token
+        headers = {'Authorization': f'Bearer {access_token}'}
+        
+        try:
+            # Feedback visual de carregamento
+            QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+            
+            response = requests.get(f"{API_BASE_URL}/api/relatorios/setor/{setor_id}", headers=headers, stream=True)
+            
+            if response.status_code == 200:
+                with open(caminho_salvar, 'wb') as f:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        f.write(chunk)
+                QApplication.restoreOverrideCursor()
+                
+                msg = QMessageBox()
+                msg.setIcon(QMessageBox.Icon.Information)
+                msg.setWindowTitle("Sucesso")
+                msg.setText(f"Relatório gerado com sucesso!")
+                msg.setInformativeText(f"Salvo em:\n{caminho_salvar}\n\nDeseja abrir o arquivo agora?")
+                msg.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+                if msg.exec() == QMessageBox.StandardButton.Yes:
+                    import os
+                    os.startfile(caminho_salvar)
+            else:
+                QApplication.restoreOverrideCursor()
+                erro_msg = response.json().get('erro', 'Erro desconhecido')
+                QMessageBox.warning(self, "Erro", f"Não foi possível gerar o relatório: {erro_msg}")
+                
+        except requests.exceptions.RequestException:
+            QApplication.restoreOverrideCursor()
+            show_connection_error_message(self)
+        except Exception as e:
+            QApplication.restoreOverrideCursor()
+            QMessageBox.critical(self, "Erro", f"Ocorreu um erro: {e}")            
 
 class MudarSenhaDialog(QDialog):
     def __init__(self, parent=None):

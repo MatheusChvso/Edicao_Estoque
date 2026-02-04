@@ -834,6 +834,71 @@ def get_versao():
     try:
         with open('versao.json', 'r') as f: return jsonify(json.load(f))
     except: return jsonify({'versao': '1.0'}), 200
+    
+    
+# --- ROTA PARA RELATÓRIO DE SETOR ---
+@app.route('/api/relatorios/setor/<int:id_setor>', methods=['GET'])
+@jwt_required()
+def relatorio_por_setor(id_setor):
+    try:
+        setor = Setor.query.get_or_404(id_setor)
+        # Busca produtos do setor ordenados por nome
+        produtos = Produto.query.filter_by(id_setor=id_setor).order_by(Produto.nome).all()
+        
+        buffer = io.BytesIO()
+        # Margens menores para aproveitar melhor a folha
+        doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=18)
+        elements = []
+        styles = getSampleStyleSheet()
+        
+        # Título do Relatório
+        titulo = Paragraph(f"Relação de Itens - {setor.nome}", styles['Title'])
+        elements.append(titulo)
+        elements.append(Spacer(1, 5*mm))
+        
+        # Cabeçalho da Tabela
+        data = [['CÓDIGO', 'PRODUTO', 'SALDO ATUAL']]
+        
+        # Preenchendo linhas
+        for p in produtos:
+            saldo = calcular_saldo_produto(p.id_produto)
+            # Se quiser ocultar produtos com saldo zero, descomente a linha abaixo:
+            # if saldo == 0: continue 
+            data.append([
+                p.codigo.strip(), 
+                Paragraph(p.nome, styles['Normal']), # Paragraph permite quebra de linha se o nome for longo
+                str(saldo)
+            ])
+            
+        if len(data) == 1:
+            elements.append(Paragraph("Nenhum produto cadastrado neste setor.", styles['Normal']))
+        else:
+            # Estilização da Tabela
+            table = Table(data, colWidths=[40*mm, 110*mm, 30*mm])
+            table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.Color(0.2, 0.4, 0.6)), # Azul do seu tema
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, 0), 'CENTER'), # Cabeçalho centralizado
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 12),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
+                ('BACKGROUND', (0, 1), (-1, -1), colors.whitesmoke),
+                ('GRID', (0, 0), (-1, -1), 1, colors.grey),
+                ('ALIGN', (2, 1), (2, -1), 'CENTER'), # Coluna Saldo Centralizada
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ]))
+            elements.append(table)
+            
+        # Rodapé simples
+        elements.append(Spacer(1, 10*mm))
+        elements.append(Paragraph(f"Gerado em: {datetime.now().strftime('%d/%m/%Y %H:%M')}", styles['Italic']))
+
+        doc.build(elements)
+        buffer.seek(0)
+        return send_file(buffer, download_name=f'relatorio_{setor.nome}.pdf', as_attachment=True, mimetype='application/pdf')
+        
+    except Exception as e:
+        return jsonify({'erro': str(e)}), 500    
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
