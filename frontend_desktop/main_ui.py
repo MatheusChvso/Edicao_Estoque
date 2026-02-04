@@ -35,7 +35,7 @@ from config import SERVER_IP
 # ==============================================================================
 access_token = None
 API_BASE_URL = f"http://{SERVER_IP}:5000"
-APP_VERSION = "2.5.0"
+APP_VERSION = "2.6.0"
 
 class SignalHandler(QObject):
     """Um gestor central para sinais globais da aplicação."""
@@ -2271,7 +2271,7 @@ class JanelaPrincipal(QMainWindow):
             self.btn_saida_rapida = QPushButton("⬅️ Saída Rápida")
             self.btn_relatorios = QPushButton("📄 Relatórios")
             self.btn_fornecedores = QPushButton("🚚 Fornecedores")
-            self.btn_naturezas = QPushButton("🌿 Naturezas")
+            
             self.btn_terminal = QPushButton("🛰️ Terminal")
             self.btn_usuarios = QPushButton("👥 Usuários")
             self.btn_logoff = QPushButton("🚪 Fazer Logoff")
@@ -2282,7 +2282,7 @@ class JanelaPrincipal(QMainWindow):
             self.layout_painel_lateral.addWidget(self.btn_saida_rapida)
             self.layout_painel_lateral.addWidget(self.btn_relatorios)
             self.layout_painel_lateral.addWidget(self.btn_fornecedores)
-            self.layout_painel_lateral.addWidget(self.btn_naturezas)
+            
             self.layout_painel_lateral.addWidget(self.btn_terminal)
             self.layout_painel_lateral.addStretch(1)
             self.layout_painel_lateral.addWidget(self.btn_logoff)
@@ -2294,7 +2294,7 @@ class JanelaPrincipal(QMainWindow):
             self.btn_saida_rapida.clicked.connect(self.mostrar_tela_saida_rapida)
             self.btn_relatorios.clicked.connect(self.mostrar_tela_relatorios)
             self.btn_fornecedores.clicked.connect(self.mostrar_tela_fornecedores)
-            self.btn_naturezas.clicked.connect(self.mostrar_tela_naturezas)
+            
             self.btn_terminal.clicked.connect(self.mostrar_tela_terminal)
             self.btn_logoff.clicked.connect(self.logoff_requested.emit)
             self.tela_dashboard.ir_para_produtos.connect(self.mostrar_tela_gestao_estoque)
@@ -2388,8 +2388,8 @@ class SobreDialog(QDialog):
         self.logo_label.installEventFilter(self)
         info_text = QLabel(
             """
-            <b>Sistema de Gestão de Estoque v2.5</b>
-            <p>Versão 29-01-2026</p>
+            <b>Sistema de Gestão de Estoque v2.6</b>
+            <p>Versão 04-02-2026</p>
             <p>Desenvolvido por Matheus com Google Gemini :D.</p>
             <p>Desenvolvido para controle de estoque na Szm.</p>
             <p><b>Tecnologias:</b> Python, PySide6, Flask, SQLAlchemy.</p>
