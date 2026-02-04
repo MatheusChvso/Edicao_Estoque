@@ -17,10 +17,10 @@ from PySide6.QtWidgets import (
     QTableWidgetItem, QHeaderView, QSizePolicy, QDialog, QFormLayout,
     QDialogButtonBox, QListWidget, QListWidgetItem, QAbstractItemView,
     QComboBox, QFileDialog, QFrame, QDateEdit, QCalendarWidget, QMenu,
-    QTextEdit
+    QTextEdit, QGraphicsDropShadowEffect
 )
 from PySide6.QtGui import (
-    QPixmap, QAction, QDoubleValidator, QKeySequence, QIcon
+    QPixmap, QAction, QDoubleValidator, QKeySequence, QIcon, QColor
 )
 from PySide6.QtCore import (
     Qt, QTimer, Signal, QDate, QEvent, QObject, QThread, QUrl
@@ -35,7 +35,7 @@ from config import SERVER_IP
 # ==============================================================================
 access_token = None
 API_BASE_URL = f"http://{SERVER_IP}:5000"
-APP_VERSION = "2.3.2026"
+APP_VERSION = "2.5.0"
 
 class SignalHandler(QObject):
     """Um gestor central para sinais globais da aplicação."""
@@ -2324,8 +2324,8 @@ class SobreDialog(QDialog):
         self.logo_label.installEventFilter(self)
         info_text = QLabel(
             """
-            <b>Sistema de Gestão de Estoque v2.3</b>
-            <p>Versão 28-08-2025</p>
+            <b>Sistema de Gestão de Estoque v2.5</b>
+            <p>Versão 29-01-2026</p>
             <p>Desenvolvido por Matheus com Google Gemini :D.</p>
             <p>Desenvolvido para controle de estoque na Szm.</p>
             <p><b>Tecnologias:</b> Python, PySide6, Flask, SQLAlchemy.</p>
@@ -2514,126 +2514,155 @@ class AppManager:
         self.show_login_window()
 
 class JanelaLogin(QMainWindow):
-    """Uma tela de login profissional em ecrã completo, inspirada no design moderno."""
+    """
+    Tela de Login Redesenhada - Estilo Card Centralizado (Moderno e Elegante)
+    """
     login_successful = Signal(dict)
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Sistema de Gestão de Estoque - Acesso")
-        # O ícone será definido pelo AppManager ou pelo estilo global
-
-        # --- Estrutura Principal ---
-        widget_central = QWidget()
-        self.setCentralWidget(widget_central)
-        layout_principal = QHBoxLayout(widget_central)
-        layout_principal.setContentsMargins(0, 0, 0, 0)
-        layout_principal.setSpacing(0)
-
-        # --- PAINEL ESQUERDO (Branding/Visual) ---
-        painel_esquerdo = QFrame()
-        painel_esquerdo.setObjectName("loginLeftPanel")
-        layout_esquerdo = QVBoxLayout(painel_esquerdo)
-        layout_esquerdo.setContentsMargins(50, 50, 50, 50)
-        layout_esquerdo.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
-        logo_label = QLabel()
-        logo_pixmap = QPixmap(resource_path("logo.png"))
-        # Usamos um tamanho maior para a logo aqui
-        logo_redimensionada = logo_pixmap.scaled(300, 200, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
-        logo_label.setPixmap(logo_redimensionada)
+        self.setWindowTitle("Login - Sistema de Estoque")
+        # Removemos o ícone daqui para deixar o estilo controlar, ou defina se preferir
         
-        titulo_branding = QLabel("Sistema de Gestão de Estoque")
-        titulo_branding.setObjectName("loginBrandingTitle")
+        # 1. Widget Central com ID para o Fundo Gradiente
+        self.central_widget = QWidget()
+        self.central_widget.setObjectName("loginBackground")
+        self.setCentralWidget(self.central_widget)
+
+        # Layout principal para centralizar o cartão
+        self.main_layout = QVBoxLayout(self.central_widget)
+        self.main_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        # 2. O Cartão de Login (Card Branco)
+        self.login_card = QFrame()
+        self.login_card.setObjectName("loginCard")
         
-        subtitulo_branding = QLabel("Entrada / Saida e Relatórios de Estoque.")
-        subtitulo_branding.setObjectName("loginBrandingSubtitle")
+        # Adiciona Sombra ao Cartão para efeito de elevação ("Elegância")
+        shadow = QGraphicsDropShadowEffect(self)
+        shadow.setBlurRadius(20)
+        shadow.setXOffset(0)
+        shadow.setYOffset(5)
+        shadow.setColor(QColor(0, 0, 0, 60)) # Sombra suave
+        self.login_card.setGraphicsEffect(shadow)
 
-        layout_esquerdo.addWidget(logo_label)
-        layout_esquerdo.addWidget(titulo_branding)
-        layout_esquerdo.addWidget(subtitulo_branding)
-        layout_esquerdo.addStretch(1) # Empurra o conteúdo para o centro
+        # Layout interno do cartão
+        self.card_layout = QVBoxLayout(self.login_card)
+        self.card_layout.setSpacing(10)
+        self.card_layout.setContentsMargins(40, 40, 40, 40)
 
-        # --- PAINEL DIREITO (Formulário) ---
-        painel_direito = QFrame()
-        painel_direito.setObjectName("loginRightPanel")
-        layout_direito_container = QVBoxLayout(painel_direito)
-        layout_direito_container.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # --- Elementos do Cartão ---
 
-        form_frame = QFrame()
-        form_frame.setObjectName("loginFormFrame")
-        form_layout = QVBoxLayout(form_frame)
-        form_layout.setSpacing(15)
+        # Logo (Centralizada)
+        self.logo_label = QLabel()
+        try:
+            logo_pixmap = QPixmap(resource_path("logo.png"))
+            if not logo_pixmap.isNull():
+                # Redimensiona proporcionalmente
+                logo_redimensionada = logo_pixmap.scaled(120, 120, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                self.logo_label.setPixmap(logo_redimensionada)
+                self.logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                self.logo_label.setObjectName("loginLogo")
+                self.card_layout.addWidget(self.logo_label)
+        except Exception:
+            pass # Se não tiver logo, segue sem erro
 
-        titulo_login = QLabel("LOGIN")
-        titulo_login.setObjectName("loginTitle")
+        # Título e Subtítulo
+        self.titulo = QLabel("Bem-vindo")
+        self.titulo.setObjectName("loginTitle")
+        self.titulo.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        
+        self.subtitulo = QLabel("Insira suas credenciais para acessar")
+        self.subtitulo.setObjectName("loginSubtitle")
+        self.subtitulo.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
+        # Campos de Entrada
         self.input_login = QLineEdit()
-        self.input_login.setPlaceholderText("O seu login de utilizador")
+        self.input_login.setPlaceholderText("Usuário")
         self.input_login.setObjectName("loginInput")
+        # Ícones ou styling extra podem ser feitos via CSS, mantemos limpo aqui
 
         self.input_senha = QLineEdit()
-        self.input_senha.setPlaceholderText("••••••••")
+        self.input_senha.setPlaceholderText("Senha")
         self.input_senha.setEchoMode(QLineEdit.EchoMode.Password)
         self.input_senha.setObjectName("loginInput")
 
-        self.botao_login = QPushButton("Entrar")
+        # Botão de Ação
+        self.botao_login = QPushButton("ENTRAR NO SISTEMA")
         self.botao_login.setObjectName("loginButton")
+        self.botao_login.setCursor(Qt.PointingHandCursor)
 
-        form_layout.addWidget(titulo_login)
-        form_layout.addWidget(QLabel("Utilizador"))
-        form_layout.addWidget(self.input_login)
-        form_layout.addWidget(QLabel("Senha"))
-        form_layout.addWidget(self.input_senha)
-        form_layout.addWidget(self.botao_login)
+        # Footer (Copyright ou Versão)
+        self.footer = QLabel(f"Versão {APP_VERSION} © 2025")
+        self.footer.setObjectName("loginFooter")
+        self.footer.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        layout_direito_container.addWidget(form_frame)
+        # Adicionando tudo ao layout do cartão
+        self.card_layout.addWidget(self.titulo)
+        self.card_layout.addWidget(self.subtitulo)
+        self.card_layout.addSpacing(10)
+        self.card_layout.addWidget(self.input_login)
+        self.card_layout.addWidget(self.input_senha)
+        self.card_layout.addWidget(self.botao_login)
+        self.card_layout.addSpacing(10)
+        self.card_layout.addWidget(self.footer)
 
-        # Adiciona os painéis ao layout principal
-        layout_principal.addWidget(painel_esquerdo, 2) # Proporção 2 (mais largo)
-        layout_principal.addWidget(painel_direito, 3) # Proporção 3
+        # Adiciona o cartão ao layout principal da janela
+        self.main_layout.addWidget(self.login_card)
 
         # Conexões
         self.botao_login.clicked.connect(self.fazer_login)
         self.input_senha.returnPressed.connect(self.botao_login.click)
-
-    def showEvent(self, event):
-        """Mostra a janela maximizada quando ela é exibida."""
-        self.showMaximized()
-        super().showEvent(event)
+        self.input_login.returnPressed.connect(self.input_senha.setFocus)
 
     def fazer_login(self):
         global access_token
-        login = self.input_login.text()
-        senha = self.input_senha.text()
+        login = self.input_login.text().strip()
+        senha = self.input_senha.text().strip()
 
         if not login or not senha:
-            QMessageBox.warning(self, "Erro de Entrada", "Os campos de login e senha não podem estar vazios.")
+            # Feedback visual simples (tremida ou borda vermelha seria ideal, mas alerta serve)
+            QMessageBox.warning(self, "Atenção", "Por favor, preencha usuário e senha.")
             return
+
+        # Feedback visual de carregamento
+        self.botao_login.setText("Verificando...")
+        self.botao_login.setEnabled(False)
+        QApplication.processEvents()
 
         url = f"{API_BASE_URL}/api/login"
         dados = {"login": login, "senha": senha}
 
         try:
-            response = requests.post(url, json=dados, timeout=10)
+            # Timeout curto para não travar muito a UI se o servidor estiver off
+            response = requests.post(url, json=dados, timeout=5)
+            
             if response and response.status_code == 200:
                 access_token = response.json()['access_token']
-                print("Login bem-sucedido! Token guardado.")
                 
+                # Pega dados do usuário
                 headers = {'Authorization': f'Bearer {access_token}'}
-                url_me = f"{API_BASE_URL}/api/usuario/me"
-                response_me = requests.get(url_me, headers=headers)
-                
-                dados_usuario_logado = response_me.json() if response_me.status_code == 200 else {'nome': 'Desconhecido', 'permissao': 'Usuario'}
-                
-                self.login_successful.emit(dados_usuario_logado)
+                try:
+                    resp_me = requests.get(f"{API_BASE_URL}/api/usuario/me", headers=headers, timeout=5)
+                    user_data = resp_me.json() if resp_me.status_code == 200 else {'nome': login, 'permissao': 'Usuario'}
+                except:
+                    user_data = {'nome': login, 'permissao': 'Usuario'}
+
+                self.login_successful.emit(user_data)
                 self.close()
             else:
-                erro_msg = response.json().get('erro', 'Credenciais inválidas.')
-                QMessageBox.warning(self, "Falha no Login", erro_msg)
-        except requests.exceptions.RequestException:
-            show_connection_error_message(self)
-
-
+                erro = response.json().get('erro', 'Credenciais inválidas') if response else "Erro desconhecido"
+                QMessageBox.warning(self, "Acesso Negado", f"{erro}")
+        
+        except requests.exceptions.ConnectionError:
+            QMessageBox.critical(self, "Erro de Conexão", 
+                "Não foi possível conectar ao servidor.\nVerifique se o backend está rodando no IP correto.")
+        except Exception as e:
+            QMessageBox.critical(self, "Erro", f"Ocorreu um erro inesperado:\n{e}")
+        
+        finally:
+            # Reseta o botão independente do resultado
+            self.botao_login.setText("ENTRAR NO SISTEMA")
+            self.botao_login.setEnabled(True)
 # ==============================================================================
 # 7. BLOCO DE EXECUÇÃO PRINCIPAL
 # ==============================================================================

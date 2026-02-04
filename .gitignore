@@ -1,1 +1,4 @@
 *.pdf
+/frontend_desktop/build
+/frontend_desktop/dist
+frontend_desktop/instalador/setup_estoque_2.5.exe
